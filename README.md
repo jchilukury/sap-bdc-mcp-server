@@ -7,6 +7,8 @@
 An MCP (Model Context Protocol) server that provides integration with SAP Business Data Cloud (BDC) Connect SDK. This server enables AI assistants like Claude to interact with SAP BDC for data sharing, Delta Sharing protocol operations, and data product management.
 
 > **Status**: ✅ Released on PyPI - v0.1.0 (2025-12-16)
+>
+> **New**: ✨ Now supports local development without Databricks notebooks! See [Local Development Setup](#local-development-setup) below.
 
 ## Features
 
@@ -20,10 +22,11 @@ This MCP server exposes the following SAP BDC capabilities:
 
 ## Prerequisites
 
-- Python 3.9 or higher
+- Python 3.9+ (Python 3.11+ recommended for local development)
 - Access to a Databricks environment
 - SAP Business Data Cloud account
 - Databricks recipient configured for Delta Sharing
+- For local development: Databricks personal access token
 
 ## Quick Start
 
@@ -48,18 +51,32 @@ pip install -e .
 
 ### Configuration
 
-Copy the example environment file and configure it:
+#### For Local Development (Recommended)
+
+Create a `.env` file in the project root:
 
 ```bash
-cp .env.example .env
+# Databricks Configuration
+DATABRICKS_RECIPIENT_NAME=your_recipient_name
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=your_databricks_token
+
+# Optional
+LOG_LEVEL=INFO
 ```
 
-Edit `.env` and set your Databricks recipient name:
+The server will automatically use `LocalDatabricksClient` which works without `dbutils`.
+
+#### For Databricks Notebook Environment
+
+If running inside Databricks notebooks, only set:
 
 ```
 DATABRICKS_RECIPIENT_NAME=your_recipient_name
 LOG_LEVEL=INFO
 ```
+
+The server will automatically detect the notebook environment and use `dbutils`.
 
 ## Usage
 
@@ -238,35 +255,184 @@ sap-bdc-mcp-server/
 └── README.md              # This file
 ```
 
+## Local Development Setup
+
+### The `dbutils` Challenge
+
+The SAP BDC Connect SDK was originally designed to run inside Databricks notebooks, requiring access to `dbutils` (Databricks utilities). This made local development challenging.
+
+### Our Solution: LocalDatabricksClient
+
+We've created `LocalDatabricksClient` - a custom wrapper that extends the SAP BDC SDK to work **without** `dbutils`. This enables:
+
+✅ **Local development** - Run on your machine without Databricks notebooks
+✅ **IDE integration** - Use your favorite development tools
+✅ **Easier debugging** - Standard Python debugging workflows
+✅ **CI/CD friendly** - Works in automated pipelines
+✅ **Claude Desktop integration** - Direct MCP server usage
+
+### How It Works
+
+The `LocalDatabricksClient` class:
+
+1. **Bypasses `dbutils` requirement** - Accepts workspace URL and API token directly
+2. **Reads from `.env` file** - No notebook context needed
+3. **Auto-detects mode** - Automatically uses brownfield (BDC Connect) or Databricks Connect mode
+4. **Maintains compatibility** - Fully compatible with the SAP BDC SDK API
+5. **Clear error messages** - Helpful guidance if configuration is missing
+
+```python
+from sap_bdc_mcp.local_client import LocalDatabricksClient
+
+# Initialize from environment variables
+client = LocalDatabricksClient.from_env()
+
+# Or with explicit credentials
+client = LocalDatabricksClient(
+    workspace_url="https://your-workspace.cloud.databricks.com",
+    api_token="your_token",
+    recipient_name="your_recipient"
+)
+```
+
+### Two Modes Supported
+
+**BDC Connect Mode (Brownfield)** ✨
+- Uses OIDC federation for authentication
+- No Databricks secrets required
+- Simpler setup
+- Automatically detected if recipient is configured
+
+**Databricks Connect Mode**
+- Requires additional secrets (api_url, tenant, token_audience)
+- Can be provided via environment variables
+- For greenfield deployments
+
+### Setup Guide
+
+See our comprehensive guides:
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[IMPLEMENTATION_SUCCESS.md](IMPLEMENTATION_SUCCESS.md)** - Technical deep dive
+- **[HOW_TO_CREATE_SHARE.md](HOW_TO_CREATE_SHARE.md)** - Complete workflow guide
+
+### For Blog Posts / Technical Articles
+
+Key points to highlight:
+
+1. **The Problem**: SAP BDC SDK requires `dbutils`, limiting usage to Databricks notebooks
+2. **The Investigation**: We analyzed the SDK to understand what `dbutils` actually provided
+3. **The Discovery**: Only 2 uses - getting workspace credentials and accessing secrets
+4. **The Solution**: Created `LocalDatabricksClient` that injects credentials directly
+5. **The Result**: Full local development support with < 200 lines of code
+
+**Technical highlights:**
+- Custom inheritance from `DatabricksClient`
+- Override `__init__` to bypass `dbutils` requirement
+- Override `_get_secret()` to read from env vars
+- Maintains all SDK functionality
+- Zero changes to SAP BDC SDK itself
+
+## Architecture
+
+### System Overview
+
+```
+┌─────────────────────────┐
+│   Claude Desktop        │
+│   (MCP Client)          │
+└───────────┬─────────────┘
+            │ MCP Protocol (stdio)
+┌───────────▼─────────────┐
+│  sap_bdc_mcp.server     │
+│  ┌───────────────────┐  │
+│  │ BDCClientManager  │  │
+│  │   (Auto-detect)   │  │
+│  └────────┬──────────┘  │
+│           ├─────────────┼─ Notebook? → DatabricksClient (dbutils)
+│           │             │
+│           └─────────────┼─ Local? → LocalDatabricksClient (.env)
+└───────────┼─────────────┘
+            │
+┌───────────▼─────────────┐
+│ SAP BDC Connect SDK     │
+│ ┌──────────────────┐    │
+│ │ BdcConnectClient │    │
+│ └────────┬─────────┘    │
+└──────────┼──────────────┘
+           │ HTTPS/OIDC
+┌──────────▼──────────────┐
+│  Databricks + SAP BDC   │
+└─────────────────────────┘
+```
+
+### Traditional Architecture
+
+The server uses:
+- **MCP SDK**: For protocol implementation
+- **SAP BDC Connect SDK**: For SAP Business Data Cloud operations
+- **Delta Sharing**: Open protocol for secure data sharing
+- **ORD Protocol**: For resource discovery and metadata
+
 ## Important Notes
 
 ### Databricks Integration
 
-The SAP BDC Connect SDK requires integration with Databricks. The server needs:
-- A valid Databricks environment with `dbutils` available
-- A configured recipient for Delta Sharing
+The server supports two integration modes:
 
-**Note**: When running outside Databricks (e.g., local development), you may need to mock or provide alternative implementations for Databricks utilities.
+**1. Notebook Mode** (Original)
+- Runs inside Databricks notebooks
+- Uses `dbutils` for credentials
+- Requires active notebook session
+
+**2. Local Mode** (New!) ✨
+- Runs on your local machine
+- Uses environment variables for credentials
+- No notebook required
 
 ### Authentication
 
 Authentication is handled through:
-1. Databricks workspace credentials
+1. Databricks workspace credentials (URL + token)
 2. Recipient configuration in Databricks
-3. SAP BDC service credentials (configured in Databricks)
+3. SAP BDC service credentials (auto-configured in BDC Connect mode)
 
 ## Troubleshooting
 
 ### "BDC client not initialized" Error
 
-The client requires initialization with Databricks utilities. If running in a non-Databricks environment, you may need to:
-- Run the server within a Databricks notebook
-- Use Databricks Connect for local development
-- Mock the required Databricks utilities for testing
+**For Local Development:**
+- Ensure `.env` file exists with `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and `DATABRICKS_RECIPIENT_NAME`
+- Check that your Databricks token is valid
+- Verify the workspace URL is correct
+
+**For Notebook Environment:**
+- Ensure you're running in a Databricks notebook with `dbutils` available
+- Set `DATABRICKS_RECIPIENT_NAME` environment variable
 
 ### Missing Environment Variables
 
-Ensure `DATABRICKS_RECIPIENT_NAME` is set in your environment or `.env` file.
+For local development, ensure these are set in your `.env` file:
+```bash
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=dapi...
+DATABRICKS_RECIPIENT_NAME=your_recipient_name
+```
+
+### "Share does not exist" Error
+
+The share must exist in Databricks before registering with SAP BDC:
+1. Create a Delta share in Databricks first
+2. Grant the share to your recipient
+3. Then register it with SAP BDC using this server
+
+See [HOW_TO_CREATE_SHARE.md](HOW_TO_CREATE_SHARE.md) for detailed steps.
+
+### "Permission denied" or "Share not granted to recipient"
+
+Grant the share to your recipient in Databricks:
+```sql
+GRANT SELECT ON SHARE your_share_name TO RECIPIENT `your_recipient_name`;
+```
 
 ## Resources
 
@@ -289,12 +455,15 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for det
 
 ## Roadmap
 
-- [ ] Initial validation with Databricks environment
-- [ ] PyPI package publication
+- [x] Initial validation with Databricks environment
+- [x] Local development support (LocalDatabricksClient)
+- [x] PyPI package publication
+- [x] Comprehensive documentation
 - [ ] npm package for Node.js environments
 - [ ] Additional SAP BDC SDK features
 - [ ] Enhanced error handling and logging
-- [ ] Integration examples and tutorials
+- [ ] More integration examples and tutorials
+- [ ] Video tutorials and demos
 
 ## Support
 
