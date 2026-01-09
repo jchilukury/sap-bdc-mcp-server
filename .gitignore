@@ -22,6 +22,7 @@ wheels/
 
 # Virtual environments
 venv/
+venv-py311/
 env/
 ENV/
 
@@ -43,3 +44,5 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+# Claude Code session files
+.claude/

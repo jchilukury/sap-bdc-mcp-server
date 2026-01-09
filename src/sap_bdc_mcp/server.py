@@ -3,11 +3,20 @@
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    logging.info(f"Loaded environment from {env_path}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,21 +33,48 @@ class BDCClientManager:
         self._client = None
         self._databricks_client = None
 
-    def initialize(self, recipient_name: str, databricks_utils: Any = None):
+    def initialize(
+        self,
+        recipient_name: str = None,
+        databricks_utils: Any = None,
+        workspace_url: str = None,
+        api_token: str = None,
+    ):
         """Initialize the BDC clients.
 
         Args:
             recipient_name: Name of the Databricks recipient
-            databricks_utils: Databricks utilities object (dbutils)
+            databricks_utils: Databricks utilities object (dbutils) - for notebook environments
+            workspace_url: Databricks workspace URL - for local development
+            api_token: Databricks API token - for local development
+
+        Note:
+            Either provide databricks_utils (for notebook) OR workspace_url + api_token (for local).
         """
         try:
-            from sap_bdc_connect_sdk import BdcConnectClient, DatabricksClient
+            from bdc_connect_sdk.auth import BdcConnectClient, DatabricksClient
+            from sap_bdc_mcp.local_client import LocalDatabricksClient
 
-            # Initialize Databricks client
-            self._databricks_client = DatabricksClient(
-                dbutils=databricks_utils,
-                recipient_name=recipient_name
-            )
+            # Determine which client to use
+            if databricks_utils is not None:
+                # Running in Databricks notebook
+                logger.info("Initializing with Databricks notebook utilities")
+                self._databricks_client = DatabricksClient(
+                    dbutils=databricks_utils,
+                    recipient_name=recipient_name
+                )
+            elif workspace_url and api_token:
+                # Running in local development mode
+                logger.info("Initializing with local credentials")
+                self._databricks_client = LocalDatabricksClient(
+                    workspace_url=workspace_url,
+                    api_token=api_token,
+                    recipient_name=recipient_name
+                )
+            else:
+                # Try to initialize from environment variables
+                logger.info("Initializing from environment variables")
+                self._databricks_client = LocalDatabricksClient.from_env()
 
             # Initialize BDC Connect client
             self._client = BdcConnectClient(self._databricks_client)
@@ -227,7 +263,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "generate_csn_template":
             share_name = arguments["share_name"]
 
-            from sap_bdc_connect_sdk import csn_generator
+            from bdc_connect_sdk.utils import csn_generator
 
             csn_template = csn_generator.generate_csn_from_share(share_name)
 
@@ -254,6 +290,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 async def main():
     """Run the MCP server."""
     logger.info("Starting SAP BDC MCP Server...")
+
+    # Initialize the client manager with credentials from environment
+    try:
+        client_manager.initialize()
+        logger.info("BDC client manager initialized successfully")
+    except Exception as e:
+        logger.warning(f"Could not initialize BDC clients at startup: {e}")
+        logger.warning("Clients will need to be initialized before use")
 
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
