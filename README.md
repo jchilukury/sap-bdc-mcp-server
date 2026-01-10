@@ -6,19 +6,21 @@
 
 An MCP (Model Context Protocol) server that provides integration with SAP Business Data Cloud (BDC) Connect SDK. This server enables AI assistants like Claude to interact with SAP BDC for data sharing, Delta Sharing protocol operations, and data product management.
 
-> **Status**: ✅ Released on PyPI - v0.1.0 (2025-12-16)
+> **Status**: ✅ Released on PyPI - **v0.2.0** (2026-01-10)
 >
-> **New**: ✨ Now supports local development without Databricks notebooks! See [Local Development Setup](#local-development-setup) below.
+> **New in v0.2.0**: ✨ Added `provision_share` (end-to-end orchestration) and `validate_share_readiness` (pre-flight validation) tools!
 
 ## Features
 
-This MCP server exposes the following SAP BDC capabilities:
+This MCP server provides **7 powerful tools** for SAP BDC operations:
 
 - **Create/Update Shares**: Manage data shares with ORD metadata
 - **CSN Schema Management**: Configure shares using Common Semantic Notation
 - **Data Product Publishing**: Publish and unpublish data products
 - **Share Deletion**: Remove and withdraw shared resources
 - **CSN Template Generation**: Auto-generate CSN templates from Databricks shares
+- **End-to-End Provisioning** ✨: One-step share creation, granting, and registration
+- **Pre-flight Validation** ✨: Validate shares before registration to prevent errors
 
 ## Prerequisites
 
