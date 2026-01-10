@@ -8,10 +8,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Additional SAP BDC SDK feature integrations
-- Enhanced error handling and logging
-- Performance optimizations
-- Integration tutorials and examples
+- npm package for Node.js/TypeScript integration
+- Docker images for containerized deployment
+- Caching layer for improved performance
+- Permission-based authorization system
+- Data quality validation tools
+- Batch operations support
+
+## [0.2.0] - 2026-01-10
+
+### Added
+
+#### New MCP Tools ✨
+- **`provision_share`** - End-to-end share provisioning orchestration
+  - Creates Databricks share in one operation
+  - Adds tables to the share automatically
+  - Grants share to recipient with SQL execution
+  - Registers with SAP BDC
+  - Provides step-by-step progress feedback
+  - Idempotent and fault-tolerant design
+  - Handles partial failures gracefully
+
+- **`validate_share_readiness`** - Pre-flight validation tool
+  - Validates share exists in Databricks
+  - Checks share has tables/objects
+  - Verifies share is granted to recipient
+  - Optionally checks BDC registration status
+  - Returns structured validation results
+  - Provides actionable next steps for failures
+  - Prevents "trial and error" registration attempts
+
+#### Major Documentation Additions
+- **BLOG_POST_VALIDATION_TOOL.md** - Comprehensive blog post content
+  - Use case-driven stories (before/after comparisons)
+  - 5 detailed real-world use cases
+  - Metrics: 70% faster onboarding, 80% fewer failed attempts, 83% fewer support tickets
+  - Code examples and integration patterns
+  - CI/CD pipeline examples
+
+- **DATABRICKS_DEPLOYMENT.md** - Multi-pattern deployment guide
+  - Pattern 1: Local MCP Server (stdio transport)
+  - Pattern 2: Databricks Notebooks (direct SDK usage)
+  - Pattern 3: Databricks Jobs (scheduled automation)
+  - Pattern 4: Databricks Apps (SSE transport for team-wide 24/7 access)
+  - Complete implementation examples for each pattern
+  - Comparison tables and decision guidance
+
+- **MCP_SERVER_COMPARISON.md** - Strategic analysis and roadmap
+  - Comparison with SAP Datasphere MCP (7 tools vs 45 tools)
+  - Expansion roadmap to v1.0.0 with 3 phases
+  - Publishing strategy (PyPI, npm, Docker, documentation site)
+  - Community building and content marketing plans
+  - Metrics to track adoption and quality
+
+- **TROUBLESHOOTING_GUIDE.md** - Common issues and solutions
+  - 10 common error scenarios with detailed fixes
+  - ORD annotation configuration issues
+  - Permission and grant problems
+  - Network and authentication troubleshooting
+  - Workspace URL and token validation
+
+#### Testing & Examples
+- **test_validate_share.py** - Validation tool test script
+  - Demonstrates validation workflow
+  - Tests both existing and non-existent shares
+  - Shows structured output format with pass/fail/warning states
+
+### Improved
+
+#### Core Functionality
+- **BDCClientManager** enhancements
+  - Added `workspace_client` property for Databricks SDK operations
+  - Added `recipient_name` property for easier access
+  - Better initialization error messages
+  - Proper client lifecycle management
+
+- **Error handling and user feedback**
+  - Step-by-step progress reporting in `provision_share`
+  - Clear error messages with recovery guidance at each step
+  - Warnings vs errors distinction in validation
+  - Actionable next steps for all failure modes
+
+- **Documentation coverage**
+  - README updated with all 7 tools documented
+  - Each tool now has comprehensive parameter documentation
+  - Use cases and workflow guidance added
+  - Real-world examples for each tool
+
+### Changed
+- Updated README status from v0.1.0 to current development state
+- Enhanced tool descriptions with more detail
+- Improved code examples to show complete workflows
+
+### Technical Improvements
+- Enhanced type hints throughout codebase
+- Better async/await patterns in MCP handlers
+- Improved logging with structured messages
+- More robust error recovery in orchestration flows
+- Warehouse ID validation for SQL operations
+
+### Developer Experience
+- Examples now show complete workflows (validation → provision → verify)
+- Better separation of concerns between validation and execution
+- Self-service troubleshooting via validation tool
+- CI/CD friendly validation patterns with exit codes
+- Clear upgrade path from manual to automated workflows
+
+### Performance
+- Validation checks run in parallel where possible
+- Reduced redundant API calls in provision flow
+- Better error short-circuiting (fail fast)
 
 ## [0.1.0] - 2025-12-16
 
@@ -70,5 +176,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/MarioDeFelipe/sap-bdc-mcp-server/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/MarioDeFelipe/sap-bdc-mcp-server/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MarioDeFelipe/sap-bdc-mcp-server/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MarioDeFelipe/sap-bdc-mcp-server/releases/tag/v0.1.0

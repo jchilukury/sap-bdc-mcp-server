@@ -32,11 +32,23 @@ This MCP server exposes the following SAP BDC capabilities:
 
 ### Installation
 
-#### From PyPI (Recommended)
+Choose your preferred language/platform:
+
+#### Python (PyPI)
 
 ```bash
 pip install sap-bdc-mcp-server
 ```
+
+#### Node.js/TypeScript (npm)
+
+```bash
+npm install @mariodefelize/sap-bdc-mcp-server
+```
+
+**Note:** The npm package requires Python 3.9+ to be installed, as it wraps the Python MCP server.
+
+See [NPM_README.md](NPM_README.md) for full Node.js/TypeScript documentation.
 
 #### From Source
 
@@ -45,8 +57,11 @@ pip install sap-bdc-mcp-server
 git clone https://github.com/MarioDeFelipe/sap-bdc-mcp-server.git
 cd sap-bdc-mcp-server
 
-# Install in development mode
+# Install Python package in development mode
 pip install -e .
+
+# Install npm dependencies (optional, for Node.js development)
+npm install
 ```
 
 ### Configuration
@@ -80,7 +95,9 @@ The server will automatically detect the notebook environment and use `dbutils`.
 
 ## Usage
 
-### Running the Server
+### Python Usage
+
+#### Running the Server
 
 The MCP server runs as a stdio-based service:
 
@@ -94,7 +111,7 @@ Or using the installed script:
 sap-bdc-mcp
 ```
 
-### Integration with Claude Desktop
+#### Integration with Claude Desktop
 
 Add this server to your Claude Desktop configuration file:
 
@@ -115,6 +132,33 @@ Add this server to your Claude Desktop configuration file:
   }
 }
 ```
+
+### Node.js/TypeScript Usage
+
+For Node.js/TypeScript applications, use the npm package:
+
+```typescript
+import { createSapBdcMcpClient } from '@mariodefelize/sap-bdc-mcp-server';
+
+const client = await createSapBdcMcpClient({
+  env: {
+    DATABRICKS_HOST: process.env.DATABRICKS_HOST,
+    DATABRICKS_TOKEN: process.env.DATABRICKS_TOKEN,
+    DATABRICKS_RECIPIENT_NAME: process.env.DATABRICKS_RECIPIENT_NAME,
+  },
+});
+
+// Validate a share
+const validation = await client.validateShareReadiness({
+  share_name: 'my_share',
+});
+
+console.log(validation);
+
+await client.close();
+```
+
+See [NPM_README.md](NPM_README.md) for complete Node.js/TypeScript documentation and examples.
 
 Alternatively, if installed in a virtual environment:
 
