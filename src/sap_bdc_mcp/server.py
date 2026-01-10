@@ -262,6 +262,25 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["share_name", "tables", "ord_metadata"]
             }
+        ),
+        Tool(
+            name="validate_share_readiness",
+            description="Validate that a Databricks share is ready for BDC Connect operations. "
+                       "Checks: share exists, has tables, granted to recipient, and provides actionable guidance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "share_name": {
+                        "type": "string",
+                        "description": "Name of the share to validate"
+                    },
+                    "check_bdc_registration": {
+                        "type": "boolean",
+                        "description": "Also check if share is already registered with BDC (default: false)"
+                    }
+                },
+                "required": ["share_name"]
+            }
         )
     ]
 
@@ -494,6 +513,204 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                          f"The Databricks share is ready. You can manually register it with:\n"
                          f"  create_or_update_share(share_name='{share_name}', ord_metadata=...)"
                 )]
+
+        elif name == "validate_share_readiness":
+            share_name = arguments["share_name"]
+            check_bdc = arguments.get("check_bdc_registration", False)
+
+            w = client_manager.workspace_client
+            recipient_name = client_manager.recipient_name
+
+            validation_results = {
+                "share_name": share_name,
+                "ready_for_bdc": True,
+                "checks": {},
+                "warnings": [],
+                "errors": [],
+                "next_steps": []
+            }
+
+            # Check 1: Does the share exist?
+            logger.info(f"Validating share '{share_name}' readiness...")
+            try:
+                share_info = w.shares.get(share_name)
+                validation_results["checks"]["share_exists"] = {
+                    "status": "✅ PASS",
+                    "message": f"Share '{share_name}' exists in Databricks"
+                }
+                logger.info("Share exists")
+            except Exception as e:
+                validation_results["ready_for_bdc"] = False
+                validation_results["checks"]["share_exists"] = {
+                    "status": "❌ FAIL",
+                    "message": f"Share '{share_name}' does not exist",
+                    "error": str(e)
+                }
+                validation_results["errors"].append(
+                    f"Share '{share_name}' not found in Databricks"
+                )
+                validation_results["next_steps"].append(
+                    f"Create the share: w.shares.create(name='{share_name}')"
+                )
+
+                return [TextContent(
+                    type="text",
+                    text=f"❌ Validation Failed\n\n"
+                         f"{json.dumps(validation_results, indent=2)}"
+                )]
+
+            # Check 2: Does the share have any objects?
+            try:
+                share_details = w.shares.get(share_name)
+                objects = share_details.objects if hasattr(share_details, 'objects') else []
+
+                if objects and len(objects) > 0:
+                    validation_results["checks"]["has_objects"] = {
+                        "status": "✅ PASS",
+                        "message": f"Share has {len(objects)} object(s)",
+                        "objects": [obj.name for obj in objects] if objects else []
+                    }
+                    logger.info(f"Share has {len(objects)} objects")
+                else:
+                    validation_results["ready_for_bdc"] = False
+                    validation_results["checks"]["has_objects"] = {
+                        "status": "❌ FAIL",
+                        "message": "Share has no tables or objects"
+                    }
+                    validation_results["errors"].append("Share is empty - no tables added")
+                    validation_results["next_steps"].append(
+                        f"Add tables: w.shares.update(name='{share_name}', updates=[{{'action': 'ADD', 'data_object': {{'name': 'catalog.schema.table', 'data_object_type': 'TABLE'}}}}])"
+                    )
+            except Exception as e:
+                validation_results["warnings"].append(f"Could not check share objects: {str(e)}")
+                validation_results["checks"]["has_objects"] = {
+                    "status": "⚠️ WARNING",
+                    "message": "Could not verify share contents",
+                    "error": str(e)
+                }
+
+            # Check 3: Is the share granted to the recipient?
+            try:
+                warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID")
+
+                if warehouse_id:
+                    grants_sql = f"SHOW GRANTS ON SHARE {share_name}"
+                    grants_result = w.statement_execution.execute_statement(
+                        warehouse_id=warehouse_id,
+                        statement=grants_sql,
+                        wait_timeout="30s"
+                    )
+
+                    # Check if recipient is in the grants
+                    granted_to_recipient = False
+                    grants_list = []
+
+                    if grants_result.result and grants_result.result.data_array:
+                        for row in grants_result.result.data_array:
+                            # Row format: [principal, action_type, object_type, details]
+                            if row and len(row) > 0:
+                                principal = str(row[0])
+                                grants_list.append(principal)
+                                if recipient_name in principal:
+                                    granted_to_recipient = True
+
+                    if granted_to_recipient:
+                        validation_results["checks"]["granted_to_recipient"] = {
+                            "status": "✅ PASS",
+                            "message": f"Share is granted to recipient '{recipient_name}'",
+                            "all_grants": grants_list
+                        }
+                        logger.info("Share is granted to recipient")
+                    else:
+                        validation_results["ready_for_bdc"] = False
+                        validation_results["checks"]["granted_to_recipient"] = {
+                            "status": "❌ FAIL",
+                            "message": f"Share is NOT granted to recipient '{recipient_name}'",
+                            "current_grants": grants_list
+                        }
+                        validation_results["errors"].append(
+                            f"Share not granted to BDC Connect recipient '{recipient_name}'"
+                        )
+                        validation_results["next_steps"].append(
+                            f"Grant share: GRANT SELECT ON SHARE {share_name} TO RECIPIENT `{recipient_name}`"
+                        )
+                else:
+                    validation_results["warnings"].append(
+                        "DATABRICKS_WAREHOUSE_ID not set - cannot verify grants"
+                    )
+                    validation_results["checks"]["granted_to_recipient"] = {
+                        "status": "⚠️ WARNING",
+                        "message": "Could not verify grants (no warehouse configured)"
+                    }
+                    validation_results["next_steps"].append(
+                        "Set DATABRICKS_WAREHOUSE_ID to enable grant verification"
+                    )
+
+            except Exception as e:
+                validation_results["warnings"].append(f"Could not check grants: {str(e)}")
+                validation_results["checks"]["granted_to_recipient"] = {
+                    "status": "⚠️ WARNING",
+                    "message": "Could not verify grants",
+                    "error": str(e)
+                }
+                validation_results["next_steps"].append(
+                    f"Manually verify: SHOW GRANTS ON SHARE {share_name}"
+                )
+
+            # Check 4: BDC registration (optional)
+            if check_bdc:
+                try:
+                    # Try to get share info from BDC - this will fail if not registered
+                    # Note: The SDK doesn't have a direct "get share" method, so we'd need to
+                    # try creating/updating and see if it's already there
+                    validation_results["checks"]["bdc_registered"] = {
+                        "status": "ℹ️ INFO",
+                        "message": "BDC registration check requires attempting registration"
+                    }
+                    validation_results["warnings"].append(
+                        "BDC registration status cannot be checked without attempting registration"
+                    )
+                except Exception as e:
+                    validation_results["checks"]["bdc_registered"] = {
+                        "status": "⚠️ WARNING",
+                        "message": "Could not check BDC registration",
+                        "error": str(e)
+                    }
+
+            # Final verdict
+            if validation_results["ready_for_bdc"]:
+                summary = f"✅ Share '{share_name}' is READY for BDC Connect registration!\n\n"
+                summary += "All checks passed:\n"
+                for check_name, check_result in validation_results["checks"].items():
+                    summary += f"  {check_result['status']} {check_result['message']}\n"
+
+                if validation_results["warnings"]:
+                    summary += "\nWarnings:\n"
+                    for warning in validation_results["warnings"]:
+                        summary += f"  ⚠️ {warning}\n"
+
+                summary += f"\nNext step: Register with BDC using create_or_update_share('{share_name}', ...)"
+            else:
+                summary = f"❌ Share '{share_name}' is NOT ready for BDC Connect\n\n"
+                summary += "Errors found:\n"
+                for error in validation_results["errors"]:
+                    summary += f"  ❌ {error}\n"
+
+                summary += "\nChecks:\n"
+                for check_name, check_result in validation_results["checks"].items():
+                    summary += f"  {check_result['status']} {check_result['message']}\n"
+
+                if validation_results["next_steps"]:
+                    summary += "\nRequired actions:\n"
+                    for i, step in enumerate(validation_results["next_steps"], 1):
+                        summary += f"  {i}. {step}\n"
+
+            summary += f"\n\nDetailed Results:\n{json.dumps(validation_results, indent=2)}"
+
+            return [TextContent(
+                type="text",
+                text=summary
+            )]
 
         else:
             return [TextContent(

@@ -281,6 +281,65 @@ This tool orchestrates the complete workflow:
 - Idempotent - safe to retry if interrupted
 - Clear visibility into each step's success/failure
 
+### 7. validate_share_readiness ✨ **NEW: Pre-flight Validation**
+
+**Validate before you register**: Check if a Databricks share is ready for BDC Connect operations.
+
+This tool performs comprehensive pre-flight checks:
+1. ✅ Verifies the share exists in Databricks
+2. ✅ Checks if the share has tables/objects
+3. ✅ Validates the share is granted to your recipient
+4. ✅ Provides actionable next steps if validation fails
+
+**Parameters:**
+- `share_name` (required): Name of the share to validate
+- `check_bdc_registration` (optional): Also check BDC registration status (default: `false`)
+
+**Example:**
+```json
+{
+  "share_name": "customer_data_share"
+}
+```
+
+**Success Response:**
+```
+✅ Share 'customer_data_share' is READY for BDC Connect registration!
+
+All checks passed:
+  ✅ PASS Share 'customer_data_share' exists in Databricks
+  ✅ PASS Share has 3 object(s)
+  ✅ PASS Share is granted to recipient 'bdc-connect-12345'
+
+Next step: Register with BDC using create_or_update_share('customer_data_share', ...)
+```
+
+**Failure Response:**
+```
+❌ Share 'test_share' is NOT ready for BDC Connect
+
+Errors found:
+  ❌ Share is empty - no tables added
+  ❌ Share not granted to BDC Connect recipient 'bdc-connect-12345'
+
+Required actions:
+  1. Add tables: w.shares.update(name='test_share', ...)
+  2. Grant share: GRANT SELECT ON SHARE test_share TO RECIPIENT `bdc-connect-12345`
+```
+
+**Use Cases:**
+- **Before registration**: Validate a share before calling `create_or_update_share`
+- **Troubleshooting**: Understand why registration failed
+- **Documentation**: Generate a checklist of what's needed
+- **CI/CD pipelines**: Automated validation before deployment
+- **Onboarding**: Help new users understand the prerequisites
+
+**Why this matters:**
+- Prevents "trial and error" workflow - know upfront if share is ready
+- Clear, actionable guidance instead of cryptic error messages
+- Saves time by catching issues before attempting registration
+- Validates all prerequisites in one call
+
 ## Architecture
 
 The server uses:
