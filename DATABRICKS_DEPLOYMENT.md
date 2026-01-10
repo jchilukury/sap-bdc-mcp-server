@@ -351,19 +351,278 @@ For production deployments, create a Databricks Job:
 
 ---
 
-## Deployment Pattern 4: Databricks Apps (Future)
+## Deployment Pattern 4: Databricks Apps (MCP over HTTP)
 
-Databricks Apps could potentially host long-running services, but currently:
+Databricks Apps can host MCP servers using **SSE (Server-Sent Events)** transport instead of stdio.
 
-**Status**: ⚠️ Experimental / Not Yet Supported
+**Status**: ✅ **Supported** via MCP SSE transport
 
-Databricks Apps are designed for web applications, not stdio-based MCP servers. However, future possibilities:
+### Architecture
 
-1. **REST API Wrapper**: Convert MCP tools to REST endpoints
-2. **WebSocket Gateway**: Bridge stdio MCP to WebSocket connections
-3. **Hybrid Approach**: Web UI that calls MCP server internally
+Instead of stdio (which won't work in Databricks Apps), use HTTP/SSE:
 
-**Not recommended** at this time - use Direct SDK usage instead.
+```
+┌─────────────────────┐
+│   AI Client         │
+│   (Claude Desktop)  │
+└──────────┬──────────┘
+           │ HTTP/SSE
+┌──────────▼──────────┐
+│  Databricks App     │
+│  ┌──────────────┐   │
+│  │ FastAPI      │   │
+│  │ + MCP SSE    │   │
+│  └──────┬───────┘   │
+│         │           │
+│  ┌──────▼───────┐   │
+│  │ SAP BDC      │   │
+│  │ Tools        │   │
+│  └──────────────┘   │
+└─────────────────────┘
+```
+
+### Complete Implementation
+
+#### 1. Project Structure
+```
+sap-bdc-mcp-app/
+├── app.yaml                  # Databricks App configuration
+├── app.py                    # FastAPI + MCP SSE server
+├── requirements.txt          # Dependencies
+├── src/
+│   ├── __init__.py
+│   ├── tools/
+│   │   ├── share_tools.py   # Share management
+│   │   └── validation.py    # Validation tools
+│   └── config.py            # Configuration
+└── .env.example
+```
+
+#### 2. Databricks App Configuration (app.yaml)
+```yaml
+command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+env:
+  - name: DATABRICKS_HOST
+    value: "{{workspace.host}}"
+  - name: DATABRICKS_TOKEN
+    value: "{{secrets.sap_bdc.databricks_token}}"
+  - name: DATABRICKS_RECIPIENT_NAME
+    value: "{{secrets.sap_bdc.recipient_name}}"
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "{{secrets.sap_bdc.warehouse_id}}"
+```
+
+#### 3. FastAPI + MCP SSE Server (app.py)
+```python
+"""SAP BDC MCP Server - Databricks App with SSE transport."""
+import asyncio
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+from mcp.server import Server
+from mcp.server.sse import SseServerTransport
+from mcp.types import Tool, TextContent
+
+# Import your existing BDC client manager
+from src.sap_bdc_mcp.server import client_manager
+
+app = FastAPI(title="SAP BDC MCP Server")
+
+# Create MCP server instance
+mcp = Server("sap-bdc-mcp-server")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize on startup."""
+    # Initialize BDC clients
+    client_manager.initialize()
+    yield
+
+app = FastAPI(lifespan=lifespan)
+
+# Register tools
+@mcp.list_tools()
+async def list_tools():
+    return [
+        Tool(
+            name="provision_share",
+            description="End-to-end share provisioning",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "share_name": {"type": "string"},
+                    "tables": {"type": "array", "items": {"type": "string"}},
+                    "ord_metadata": {"type": "object"}
+                },
+                "required": ["share_name", "tables", "ord_metadata"]
+            }
+        ),
+        Tool(
+            name="validate_share_readiness",
+            description="Validate share readiness for BDC",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "share_name": {"type": "string"}
+                },
+                "required": ["share_name"]
+            }
+        ),
+        # ... other tools
+    ]
+
+@mcp.call_tool()
+async def call_tool(name: str, arguments: dict):
+    """Execute tools - import from your existing implementation."""
+    from src.sap_bdc_mcp.server import call_tool as execute_tool
+    return await execute_tool(name, arguments)
+
+# SSE endpoint for MCP
+@app.get("/sse")
+async def sse_endpoint():
+    """Server-Sent Events endpoint for MCP."""
+    async def event_generator():
+        transport = SseServerTransport("/messages")
+
+        async with mcp.run(
+            transport.read_stream,
+            transport.write_stream,
+            mcp.create_initialization_options()
+        ):
+            # Keep connection alive
+            while True:
+                await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
+
+@app.post("/messages")
+async def messages_endpoint(request: dict):
+    """Handle MCP messages."""
+    # Process MCP requests
+    pass
+
+@app.get("/health")
+async def health():
+    """Health check."""
+    return {"status": "healthy", "service": "sap-bdc-mcp-server"}
+```
+
+#### 4. Dependencies (requirements.txt)
+```
+fastapi>=0.104.0
+uvicorn>=0.24.0
+mcp>=1.0.0
+sse-starlette>=1.6.5
+sap-bdc-connect-sdk>=1.1.0
+databricks-sdk>=0.18.0
+python-dotenv>=1.0.0
+```
+
+#### 5. Deploy to Databricks Apps
+
+**Prerequisites:**
+```bash
+# Install Databricks CLI
+pip install databricks-cli
+
+# Configure authentication
+databricks configure --token
+```
+
+**Create Secret Scope:**
+```bash
+# Create secret scope
+databricks secrets create-scope sap_bdc
+
+# Add secrets
+databricks secrets put-secret sap_bdc databricks_token
+databricks secrets put-secret sap_bdc recipient_name
+databricks secrets put-secret sap_bdc warehouse_id
+```
+
+**Deploy App:**
+```bash
+# From project root
+databricks apps create sap-bdc-mcp-server
+
+# Deploy
+databricks apps deploy sap-bdc-mcp-server \
+  --source-code-path .
+
+# Check status
+databricks apps get sap-bdc-mcp-server
+```
+
+#### 6. Connect from Claude Desktop
+
+Update your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "sap-bdc-databricks": {
+      "url": "https://your-workspace.cloud.databricks.com/serving-endpoints/sap-bdc-mcp-server/sse",
+      "transport": "sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_DATABRICKS_TOKEN"
+      }
+    }
+  }
+}
+```
+
+### Key Differences: Databricks App vs Local
+
+| Aspect | Local MCP Server | Databricks App MCP |
+|--------|-----------------|-------------------|
+| **Transport** | stdio | HTTP/SSE |
+| **Hosting** | Your machine | Databricks managed |
+| **Authentication** | .env file | Databricks secrets |
+| **Scaling** | Single instance | Auto-scaling |
+| **Availability** | When you run it | 24/7 |
+| **Access** | Local only | Team-wide via URL |
+| **Cost** | Free | Databricks compute |
+
+### When to Use Databricks Apps
+
+✅ **Use Databricks Apps when:**
+- Multiple team members need access
+- Want 24/7 availability
+- Need centralized management
+- Want to leverage Databricks secrets/security
+- Team is already using Databricks
+
+❌ **Use Local MCP Server when:**
+- Personal development/testing
+- Don't want to pay for Databricks compute
+- Need quick iteration cycles
+- Working offline
+
+### Important Notes
+
+1. **SSE vs stdio**: Databricks Apps require HTTP/SSE transport. The local MCP server uses stdio.
+
+2. **Code Reuse**: The core tool logic (from `server.py`) can be reused. Only the transport layer changes.
+
+3. **Secrets Management**: Use Databricks secrets instead of `.env` files for production.
+
+4. **Monitoring**: Databricks Apps provide built-in logging and monitoring.
+
+5. **Cost**: Running 24/7 will incur Databricks compute costs.
+
+### Alternative: Serverless Deployment
+
+For even lower cost, consider deploying as a **Databricks SQL Warehouse endpoint** or **AWS Lambda** with HTTP/SSE, but that requires more custom infrastructure.
+
+**Recommendation**:
+- **Development**: Local stdio MCP server
+- **Production/Team**: Databricks App with SSE
+- **Cost-sensitive**: Direct SDK usage in notebooks/jobs
 
 ---
 
