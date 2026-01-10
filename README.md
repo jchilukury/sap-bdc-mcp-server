@@ -225,6 +225,62 @@ Generate a CSN template from an existing Databricks share.
 }
 ```
 
+### 6. provision_share ✨ **NEW: End-to-End Orchestration**
+
+**One-step provisioning**: Creates Databricks share, grants to recipient, and registers with SAP BDC in a single operation.
+
+This tool orchestrates the complete workflow:
+1. Creates the Databricks Delta share
+2. Adds specified tables to the share
+3. Grants the share to your configured recipient
+4. Registers the share with SAP BDC
+
+**Parameters:**
+- `share_name` (required): Name of the share to create
+- `tables` (required): Array of table names (format: `catalog.schema.table` or `schema.table`)
+- `ord_metadata` (required): ORD metadata object
+  - `title` (required): Display title for the share
+  - `shortDescription`: Brief description
+  - `description`: Detailed description
+  - `version`: Version number (e.g., "1.0.0")
+  - `releaseStatus`: Status (e.g., "active", "beta")
+  - `tags`: Array of tags
+- `comment` (optional): Comment for the Databricks share
+- `auto_grant` (optional): Auto-grant to recipient (default: `true`)
+- `skip_if_exists` (optional): Skip if share already exists (default: `true`)
+
+**Example:**
+```json
+{
+  "share_name": "customer_analytics",
+  "tables": ["main.analytics.customers", "main.analytics.orders"],
+  "ord_metadata": {
+    "title": "Customer Analytics Data",
+    "shortDescription": "Customer and order data for analytics",
+    "description": "Comprehensive customer analytics dataset including customer profiles and order history",
+    "version": "1.0.0",
+    "releaseStatus": "active",
+    "tags": ["analytics", "customer", "orders"]
+  },
+  "comment": "Customer analytics share for data consumers",
+  "auto_grant": true
+}
+```
+
+**What it does:**
+- ✅ Creates Databricks share (or skips if exists)
+- ✅ Adds all specified tables to the share
+- ✅ Grants SELECT permission to your recipient
+- ✅ Registers with SAP BDC with ORD metadata
+- ✅ Provides step-by-step progress feedback
+- ✅ If any step fails, shows what completed and what to do manually
+
+**Why use this instead of manual steps:**
+- Single command instead of 4 separate operations
+- Automatic error handling and recovery guidance
+- Idempotent - safe to retry if interrupted
+- Clear visibility into each step's success/failure
+
 ## Architecture
 
 The server uses:
