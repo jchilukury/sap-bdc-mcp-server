@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0] - 2026-05-02
+
+### Added — driven by SAP help.sap.com 2026-05-02 batch (3 PDFs)
+- **`validate_databricks_privileges`** — pre-flight check that the executing principal has the 6 metastore privileges required for BDC sharing: CREATE CATALOG, CREATE SHARE, SET SHARE PERMISSION, USE PROVIDER, USE RECIPIENT, USE SHARE. Source: SAP help.sap.com "Working with Data Products in SAP Databricks".
+- **`validate_ord_metadata`** — local ORD JSON validation. Catches the most common publish failures before round-tripping the SDK. Rules: required `title`/`shortDescription`/`description`; `description` must NOT contain `shortDescription` (explicit SAP rule); `visibility` ∈ {public, interval, private}; `releaseStatus` ∈ {active, beta, deprecated}; ISO 8601 dates; sunsetDate ≥ deprecationDate.
+- **`list_unsupported_share_assets`** — scan a Databricks catalog/schema and flag assets that cannot be shared via Delta Sharing to BDC. As of May 2026 the only known unsupported type is materialized views.
+
+### Changed
+- `create_or_update_share` now runs `validate_ord_metadata` automatically before forwarding to the SDK. Bypass with `skip_validation=true`.
+- `sap-bdc-connect-sdk` dependency loosened from `>=1.1.6` to `>=1.0.9` to match the SAP-published reference version. By the way, the previous `==1.1.13` pin in the bundled plugin skill was incorrect; replaced with a `>=` floor.
+- Description updated to reflect 17 tools (was 14).
+
+### Notes
+- **Deletion vectors clarification**: SAP Note 3706399 (delete vectors break inbound sharing) and the new derived-DP guide (enable delete vectors on your own derived tables) do NOT contradict — they cover opposite sides of the share.
+- Bumped from 0.3.0 → 0.5.0 (skipping 0.4.0 — that version was a plugin-only release).
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

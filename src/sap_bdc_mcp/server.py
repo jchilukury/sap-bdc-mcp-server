@@ -12,6 +12,11 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
+from sap_bdc_mcp.extended_tools import (
+    EXTENDED_TOOL_SCHEMAS,
+    dispatch_extended,
+)
+
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent.parent / ".env"
 if env_path.exists():
@@ -123,6 +128,12 @@ client_manager = BDCClientManager()
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available SAP BDC tools."""
+    base_tools = _base_tools()
+    extended = [Tool(**schema) for schema in EXTENDED_TOOL_SCHEMAS]
+    return base_tools + extended
+
+
+def _base_tools() -> list[Tool]:
     return [
         Tool(
             name="create_or_update_share",
@@ -143,6 +154,10 @@ async def list_tools() -> list[Tool]:
                         "type": "array",
                         "description": "List of table names to include in the share",
                         "items": {"type": "string"}
+                    },
+                    "skip_validation": {
+                        "type": "boolean",
+                        "description": "v0.5.0+ — bypass the ORD pre-flight validation. Default false."
                     }
                 },
                 "required": ["share_name"]
@@ -291,10 +306,44 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     try:
         client = client_manager.client
 
+        # Try extended tools first (v0.3.0+): list_shares, diagnose_share_error, etc.
+        try:
+            extended_result = dispatch_extended(
+                name,
+                arguments,
+                bdc_client=client,
+                workspace_client=client_manager._workspace_client,
+            )
+        except Exception as e:
+            logger.error(f"Extended tool '{name}' raised: {e}")
+            extended_result = f"❌ Extended tool '{name}' failed: {e}"
+
+        if extended_result is not None:
+            return [TextContent(type="text", text=extended_result)]
+
         if name == "create_or_update_share":
             share_name = arguments["share_name"]
             ord_metadata = arguments.get("ord_metadata", {})
             tables = arguments.get("tables", [])
+            skip_validation = bool(arguments.get("skip_validation", False))
+
+            # v0.5.0 — pre-flight ORD validation (skippable)
+            if not skip_validation:
+                from sap_bdc_mcp.extended_tools import handle_validate_ord_metadata
+                # ord_metadata may be the inner ORD object OR the wrapped {"@openResourceDiscoveryV1": {...}}
+                _validation_payload = ord_metadata if isinstance(ord_metadata, dict) else {}
+                _validation = json.loads(
+                    handle_validate_ord_metadata({"ord": _validation_payload})
+                )
+                if not _validation.get("valid", False):
+                    return [TextContent(
+                        type="text",
+                        text=(
+                            f"❌ Refusing to call create_or_update_share — ORD validation failed.\n"
+                            f"Errors:\n  - " + "\n  - ".join(_validation.get("errors", [])) +
+                            f"\n\nPass skip_validation=true to bypass."
+                        )
+                    )]
 
             result = client.create_or_update_share(
                 share_name=share_name,
@@ -746,5 +795,10 @@ async def main():
         )
 
 
-if __name__ == "__main__":
+def run():
+    """Synchronous entrypoint for the console script (pyproject.toml [project.scripts])."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()
